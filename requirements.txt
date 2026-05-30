@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+python-multipart 
+pydantic
+langchain_openai
+dotenv
+sqlalchemy
+python-jose
+passlib
+bcrypt
+langchain_community\
+langchain_groq
