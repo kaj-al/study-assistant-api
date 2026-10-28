@@ -1,196 +1,58 @@
-# AI Study API
+# Nexora AI Study Platform - API Documentation
 
-An AI-powered FastAPI backend and study assistance.
+An AI-powered FastAPI backend powering the Nexora Web Application.
 
 ## Base URL
-http://127.0.0.1:8000
+`http://127.0.0.1:8000`
+
+## Interactive Documentation
+- **Swagger UI**: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+- **ReDoc**: [http://127.0.0.1:8000/redoc](http://127.0.0.1:8000/redoc)
+
+---
 
 ## Tech Stack
-- FastAPI
-- SQLite
-- SQLAlchemy
-- JWT Authentication
-- Passlib/Bcrypt
-- PyJWT
-- Groq/Langchain
+- **Framework**: FastAPI
+- **Database**: SQLite with SQLAlchemy ORM
+- **Authentication**: JWT (JSON Web Tokens) with Bcrypt password hashing
+- **AI Engine**: Groq Cloud LLM (`openai/gpt-oss-120b`, `openai/gpt-oss-20b`, `qwen/qwen3.8-27b`)
+- **CORS**: Configured for Next.js frontend (`*`)
 
-## Features
-- User Signup
-- User Login
-- JWT Authentication
-- AI notes summarization
-- Quiz generation
-- Study Plan
-- Storage
-- Swagger Documentation
+---
 
-## Installation
-### Clone Repository
-```bash 
-git clone https://github.com/kaj-al/study-assistant-api.git
-```
+## Key Endpoints
 
-### Create Virtual Environment
+### 1. Health & Status
+- `GET /` - Root health check & API status
+- `GET /health` - Database & service status
+
+### 2. Authentication
+- `POST /signup` - Register a new student account
+- `POST /login` - Log in and receive JWT `access_token`
+- `GET /me` - Retrieve authenticated user profile (requires `Bearer` token)
+
+### 3. AI Learning Tools
+- `POST /summarize` - Summarize educational notes into overview + key bullet points
+- `POST /quiz` - Generate multiple-choice quiz questions with answers and explanations
+- `POST /study-plan` - Build structured day-by-day study roadmap for any topic and duration
+- `POST /chat` - Interactive AI Tutor for answering study questions and doubt solving
+- `POST /assessment` - Generate university/school level examination papers
+- `POST /notes/generate` - Generate full structured study notes from raw material
+
+### 4. Notes & Database Storage
+- `POST /notes/save` - Save study note/summary to SQLite
+- `GET /notes` - Retrieve saved notes
+- `DELETE /notes/{id}` - Delete a saved note
+- `GET /history` - Recent generation logs
+- `GET /stats` - Study metrics (hours, quiz counts, notes count)
+
+---
+
+## Running the API
 ```bash
-python -m venv venv
+python run_backend.py
 ```
-
-### Activate Environment
-- Windows
+Or directly with Uvicorn:
 ```bash
-venv\Scripts\activate
+uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
--Mac/Linux
-```bash
-source venv/bin/activate
-```
-### Install requirements
-```bash
-pip install -r requirements.txt
-```
-## Run API
-```bash
-uvicorn main:app --reload
-```
-## Swagger Documentation
-Open:
-```bash
-http://127.0.0.1:8000/docs
-```
-## ReDoc Documentation
-Open:
-```bash
-http://127.0.0.1:8000/redoc
-```
-## Authentication
-This API uses JWT based authentication.
-
-## Endpoints
-1. Home Route
-- ```GET/```
-```bash
-{"message":"Running"}
-```
-2. User Signup
-- ```POST/signup```
-```bash
-{
- "name":"xyz",
- "email":"xyz@gmail.com",
- "password":"123456"
-}
-```
-```bash
-{"message":"User created successfully"}
-```
-3. User Login
-- ```POST/login``` 
-```bash
-{
- "email":"xyz@gmail.com",
- "password":"123456"
-}
-```
-```bash
-{
-    "access_token":"jwt_token",
-    "token_type":"bearer"
-}
-```
-4. AI Text Summarization
-- ```POST/summarize```
-
-```bash
-{
-    "text":"AI is transforming education and learning systems."
-}
-```
-
-```bash
-{
-    "summary":"AI is transforming education."
-}
-```
-5. AI Generated quiz
-- ```POST/quiz```
-
-```bash
-{
-    "text":"AI is transforming education and learning systems."
-}
-```
-
-```bash
-{
-    "summary":"AI is transforming education."
-}
-```
-
-6. AI generated Study Plan
-- ```POST/study-plan```
-
-```bash
-{
-    "text":"AI is transforming education and learning systems."
-}
-```
-
-```bash
-{
-    "summary":"AI is transforming education."
-}
-```
-
-## DATABASE TABLES
-
-### Users Table
-|Column|Type|
-|------|----|
-|id |Integer|
-|name|String|
-|email|String|
-|password|String|
-
-### Notes Table
-|Column|Type|
-|------|----|
-|id |Integer|
-|content|String|
-|summary|Text|
-
-### History Table
-|Column|Type|
-|------|----|
-|id |Integer|
-|org_text|Text|
-|summary|Text|
-
-## Folder Structure
-
-- main.py
-- authen.py
-- database.py
-- models.py
-- schemas.py
-- requirements.txt
-- .env
-- test.db
-- DOCUMENTATION.md
-
-## JWT Authentication Flow
-
-User Login -> Password Verification -> JWT Token Generation -> Protected API Access
-
-## Security Features
-- Password hashing with Bcrypt
-- JWT Authentication
-- Protected User Data
-- Environment Variable Supoort
-
-## Environment Variables
-Create.env
-```bash
-SECRET_KEY=secret_key
-GROQ_API_KEY=api_key
-```
-
