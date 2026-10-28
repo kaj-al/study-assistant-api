@@ -32,46 +32,184 @@ def get_ffmpeg_binary() -> str:
         pass
     return "ffmpeg"
 
+def clean_transcript_text(text: str) -> str:
+    """Cleans subtitle tokens, music notes, and formats text into readable paragraphs."""
+    if not text:
+        return ""
+    # Remove caption noise like [Music], [Applause], (cheers), ♪ symbols
+    text = re.sub(r'\[.*?\]|\(.*?\)|♪', ' ', text)
+    # Collapse multiple whitespaces and newlines
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
+
 def extract_youtube_id(url: str) -> Optional[str]:
-    match = YOUTUBE_REGEX.search(url)
-    if match:
-        return match.group(1)
+    """Robustly extracts 11-char YouTube ID from any format (shorts, embed, youtu.be, live, mobile)."""
+    if not url:
+        return None
+    url = url.strip()
+
+    try:
+        parsed = urlparse(url)
+        if "youtube" in parsed.netloc or "youtu.be" in parsed.netloc:
+            # Query param ?v=
+            qs = parse_qs(parsed.query)
+            if "v" in qs and qs["v"]:
+                return qs["v"][0][:11]
+            # Path based /shorts/ID, /embed/ID, /live/ID, /v/ID
+            path_parts = [p for p in parsed.path.split("/") if p]
+            if "youtu.be" in parsed.netloc and path_parts:
+                return path_parts[0][:11]
+            if len(path_parts) >= 2 and path_parts[0] in ("shorts", "embed", "v", "live"):
+                return path_parts[1][:11]
+            if len(path_parts) == 1 and len(path_parts[0]) == 11:
+                return path_parts[0]
+    except Exception:
+        pass
+
+    # Regex fallbacks
+    patterns = [
+        r'(?:v=|\/)([0-9A-Za-z_-]{11})(?:[&?#\/]|$)',
+        r'youtu\.be\/([0-9A-Za-z_-]{11})',
+        r'youtube\.com\/shorts\/([0-9A-Za-z_-]{11})',
+        r'youtube\.com\/embed\/([0-9A-Za-z_-]{11})',
+    ]
+    for pattern in patterns:
+        m = re.search(pattern, url)
+        if m:
+            return m.group(1)
     return None
 
 def get_youtube_transcript_fast(video_id: str) -> Optional[str]:
+    """Fetches YouTube subtitles/captions directly with comprehensive language and translation fallbacks."""
     try:
         from youtube_transcript_api import YouTubeTranscriptApi
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['en', 'hi', 'en-US', 'en-GB'])
-        text = " ".join([item.get('text', '') for item in transcript_list])
-        if text.strip():
-            return text.strip()
+        target_languages = ['en', 'en-US', 'en-GB', 'hi', 'en-IN']
+
+        ytt = YouTubeTranscriptApi()
+
+        # 1. Try direct fetch with target languages
+        try:
+            fetched = ytt.fetch(video_id, languages=target_languages)
+            snippets = getattr(fetched, 'snippets', fetched)
+            parts = [s.text.strip() for s in snippets if getattr(s, 'text', '').strip()]
+            full = " ".join(parts).strip()
+            if full and len(full) > 20:
+                logger.info(f"Direct fast transcript fetched for {video_id} ({len(full)} chars)")
+                return clean_transcript_text(full)
+        except Exception as e:
+            logger.debug(f"Direct ytt.fetch failed for {video_id}: {e}")
+
+        # 2. Try listing all transcripts (manual & generated)
+        try:
+            transcript_list = ytt.list(video_id)
+            selected_transcript = None
+
+            # 2a. Look for manual transcript in target languages
+            for lang in target_languages:
+                try:
+                    selected_transcript = transcript_list.find_manually_created_transcript([lang])
+                    if selected_transcript:
+                        break
+                except Exception:
+                    pass
+
+            # 2b. Look for generated transcript in target languages
+            if not selected_transcript:
+                for lang in target_languages:
+                    try:
+                        selected_transcript = transcript_list.find_generated_transcript([lang])
+                        if selected_transcript:
+                            break
+                    except Exception:
+                        pass
+
+            # 2c. Look for ANY transcript that can be translated to English
+            if not selected_transcript:
+                for t in transcript_list:
+                    if getattr(t, 'is_translatable', False):
+                        try:
+                            selected_transcript = t.translate('en')
+                            break
+                        except Exception:
+                            pass
+
+            # 2d. Fallback to the first available transcript in the list
+            if not selected_transcript:
+                for t in transcript_list:
+                    selected_transcript = t
+                    break
+
+            if selected_transcript:
+                fetched = selected_transcript.fetch()
+                snippets = getattr(fetched, 'snippets', fetched)
+                parts = []
+                for s in snippets:
+                    if hasattr(s, 'text'):
+                        t_str = s.text.strip()
+                    elif isinstance(s, dict):
+                        t_str = s.get('text', '').strip()
+                    else:
+                        t_str = str(s).strip()
+                    if t_str:
+                        parts.append(t_str)
+                full = " ".join(parts).strip()
+                if full and len(full) > 20:
+                    logger.info(f"Listed transcript fetched ({selected_transcript.language_code}) for {video_id}")
+                    return clean_transcript_text(full)
+        except Exception as e:
+            logger.debug(f"ytt.list failed for {video_id}: {e}")
+
     except Exception as e:
         logger.warning(f"Fast transcript fetch failed for {video_id}: {e}")
     return None
 
 def download_youtube_audio_fallback(url: str) -> Tuple[str, str, int]:
-    """Downloads YouTube audio and returns (wav_path, title, duration_seconds)"""
+    """Downloads YouTube audio and returns (mp3_path, title, duration_seconds)"""
     import yt_dlp
     workdir = tempfile.mkdtemp(prefix="nexora_yt_")
     ffmpeg_exe = get_ffmpeg_binary()
+    ffmpeg_dir = os.path.dirname(ffmpeg_exe) if ffmpeg_exe and os.path.isabs(ffmpeg_exe) else None
+
     opts = {
-        "format": "bestaudio/best",
+        "format": "ba[ext=m4a]/ba/b",
         "outtmpl": os.path.join(workdir, "%(title)s.%(ext)s"),
         "noplaylist": True,
         "quiet": True,
-        "ffmpeg_location": ffmpeg_exe,
+        "no_warnings": True,
+        "nocheckcertificate": True,
+        "ffmpeg_location": ffmpeg_dir or ffmpeg_exe,
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "web"]
+            }
+        },
         "postprocessors": [{
             "key": "FFmpegExtractAudio",
             "preferredcodec": "mp3",
             "preferredquality": "128",
         }],
     }
-    title = "YouTube Lecture"
+    title = "YouTube Video Lecture"
     duration = 0
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        title = info.get("title", "YouTube Lecture")
-        duration = info.get("duration", 0)
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            title = info.get("title") or title
+            duration = int(info.get("duration") or 0)
+    except Exception as e:
+        logger.warning(f"yt_dlp primary audio download failed, attempting simple audio format: {e}")
+        opts_fallback = {
+            "format": "worstaudio/worst",
+            "outtmpl": os.path.join(workdir, "lecture.%(ext)s"),
+            "noplaylist": True,
+            "quiet": True,
+            "no_warnings": True,
+            "nocheckcertificate": True,
+        }
+        with yt_dlp.YoutubeDL(opts_fallback) as ydl:
+            info = ydl.extract_info(url, download=True)
+            title = info.get("title") or title
+            duration = int(info.get("duration") or 0)
 
     files = glob.glob(os.path.join(workdir, "*.mp3")) or glob.glob(os.path.join(workdir, "*.*"))
     if not files:
@@ -270,10 +408,10 @@ def process_youtube_notes(url: str) -> Dict[str, Any]:
         transcript = get_youtube_transcript_fast(video_id)
         try:
             import yt_dlp
-            with yt_dlp.YoutubeDL({"quiet": True, "extract_flat": True}) as ydl:
+            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "nocheckcertificate": True, "extract_flat": True}) as ydl:
                 info = ydl.extract_info(url, download=False)
-                title = info.get("title", title)
-                duration = info.get("duration", 0)
+                title = info.get("title") or title
+                duration = int(info.get("duration") or 0)
         except Exception:
             pass
 
