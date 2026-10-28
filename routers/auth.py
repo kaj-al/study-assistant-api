@@ -3,19 +3,12 @@ from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from typing import Optional, Dict, Any
 
-from database import SessionLocal
+from database import get_db
 from models import User
 from schemas import Signup, Login, TokenResponse, AuthVerifyResponse
-from authen import hashPassword, verifyPassword, token, decode_token, security, get_current_user
+from authen import hashPassword, verifyPassword, token, decode_token, security, get_current_user, get_current_user_email
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)
 def signup(data: Signup, db: Session = Depends(get_db)):
@@ -24,7 +17,7 @@ def signup(data: Signup, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Email already registered. Please log in.")
     
     hashed = hashPassword(data.password)
-    user = User(name=data.name, email=data.email, password=hashed)
+    user = User(name=data.name, email=data.email, password=hashed, role="student")
     db.add(user)
     db.commit()
     db.refresh(user)
@@ -33,7 +26,7 @@ def signup(data: Signup, db: Session = Depends(get_db)):
     return {
         "access_token": jwt_token,
         "token_type": "bearer",
-        "user": {"id": user.id, "name": user.name, "email": user.email}
+        "user": {"id": user.id, "name": user.name, "email": user.email, "role": user.role}
     }
 
 @router.post("/login", response_model=TokenResponse)
@@ -46,13 +39,13 @@ def login(data: Login, db: Session = Depends(get_db)):
     return {
         "access_token": jwt_token,
         "token_type": "bearer",
-        "user": {"id": user.id, "name": user.name, "email": user.email}
+        "user": {"id": user.id, "name": user.name, "email": user.email, "role": user.role}
     }
 
 @router.get("/verify", response_model=AuthVerifyResponse)
 def verify_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)):
     if not credentials:
-        # Also return verified: True for guest browsing so frontend does not block
+        # Return guest session active so browsing is smooth
         return {
             "verified": True,
             "email": "student@nexora.ai",
@@ -79,5 +72,24 @@ def verify_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(s
     }
 
 @router.get("/me")
-def get_me(user: Dict[str, Any] = Depends(get_current_user)):
-    return user
+def get_me(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+    db: Session = Depends(get_db)
+):
+    """Returns profile for currently authenticated user."""
+    user_email = get_current_user_email(credentials) or "guest@nexora.ai"
+    user = db.query(User).filter(User.email == user_email).first()
+    if user:
+        return {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "role": user.role or "student",
+            "created_at": user.created_at
+        }
+    return {
+        "id": 1,
+        "name": user_email.split("@")[0].capitalize(),
+        "email": user_email,
+        "role": "student"
+    }
