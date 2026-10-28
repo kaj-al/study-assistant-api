@@ -36,7 +36,7 @@ def call_groq(prompt: str, system: str = SYSTEM_PROMPT, max_tokens: int = 2000, 
                     "temperature": temperature,
                     "max_tokens": max_tokens
                 },
-                timeout=25
+                timeout=12
             )
             if res.status_code == 200:
                 data = res.json()
@@ -52,7 +52,7 @@ def call_openrouter(prompt: str, system: str = SYSTEM_PROMPT, max_tokens: int = 
     api_key = config.OPENROUTER_API_KEY
     if not api_key:
         return None
-    models = ["openai/gpt-4o-mini", "google/gemini-2.0-flash-001", "meta-llama/llama-3.1-8b-instruct", "deepseek/deepseek-chat"]
+    models = ["deepseek/deepseek-chat", "meta-llama/llama-3.1-8b-instruct", "openai/gpt-4o-mini", "google/gemini-2.5-flash"]
     for model in models:
         try:
             res = requests.post(
@@ -70,7 +70,7 @@ def call_openrouter(prompt: str, system: str = SYSTEM_PROMPT, max_tokens: int = 
                     "temperature": temperature,
                     "max_tokens": max_tokens
                 },
-                timeout=30
+                timeout=12
             )
             if res.status_code == 200:
                 data = res.json()
@@ -327,17 +327,21 @@ def generate_assessment_paper(topic: str, difficulty: str = "Medium", num_questi
 
 def tutor_chat_coach(user_message: str, history: List[Dict[str, str]], language: str = "English") -> str:
     system = (
-        "You are an AI Learning Coach (Nexora Tutor).\n"
-        "Your pedagogical cycle:\n"
-        "1. Explain the concept clearly and concisely with a brief real-world analogy.\n"
-        "2. Ask ONE multiple choice check question to confirm understanding.\n"
-        "3. If the user answered a previous question correctly, celebrate their success and step up the difficulty.\n"
-        "4. If the user answered incorrectly, gently re-explain the concept in simpler terms.\n"
+        "You are Nexora, an elite, highly encouraging, interactive AI Learning Coach and academic tutor.\n"
+        "Your pedagogical approach:\n"
+        "1. Clarify doubts directly and concisely using an intuitive, real-world analogy.\n"
+        "2. Break down complex steps into clean, readable points.\n"
+        "3. Conclude with ONE multiple-choice check question (labeled Question, with 4 distinct options: A, B, C, D) to verify student understanding and encourage active recall.\n"
+        "4. If the student answers your question or gets it right, praise them and advance the topic.\n"
+        "5. If they get it wrong, gently explain why and simplify the concept.\n"
+        "6. Do NOT use markdown asterisks (no '**' or '*'). Use clean capitalization, headers, and dashes (-).\n"
         f"Respond in {language}."
     )
     context_msgs = []
     for h in history[-8:]:
-        context_msgs.append(f"{h.get('role', 'user').capitalize()}: {h.get('content', '')}")
+        role_label = "Student" if h.get("role") == "user" else "Nexora Tutor"
+        context_msgs.append(f"{role_label}: {h.get('content', '')}")
     context_str = "\n".join(context_msgs)
-    prompt = f"Chat History:\n{context_str}\n\nStudent: {user_message}\nAI Coach:"
-    return generate_text(prompt, system=system, max_tokens=1200)
+    prompt = f"{context_str}\n\nStudent: {user_message}\nNexora Tutor:"
+    raw = generate_text(prompt, system=system, max_tokens=1200, temperature=0.4)
+    return clean_asterisks(raw)
