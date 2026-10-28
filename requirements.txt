@@ -5,6 +5,7 @@ pydantic
 langchain_openai
 python-dotenv
 sqlalchemy
+alembic
 python-jose
 passlib
 bcrypt
