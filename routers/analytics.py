@@ -4,7 +4,7 @@ from sqlalchemy import func
 from typing import Optional, List, Dict, Any
 
 from database import get_db
-from models import Note, History, QuizAttempt, Quiz, StudyPlan, ChatSession, MediaTranscript
+from models import Note, History, QuizAttempt, Quiz, StudyPlan, ChatSession, MediaTranscript, User
 from schemas import DashboardStats
 from authen import get_current_user_email
 
@@ -12,21 +12,33 @@ router = APIRouter(prefix="/analytics", tags=["Analytics & History"])
 
 @router.get("/stats", response_model=DashboardStats)
 def get_user_stats(user_email: Optional[str] = Depends(get_current_user_email), db: Session = Depends(get_db)):
-    """Computes real, live study statistics aggregated across all user database activities."""
-    email_str = user_email or "guest@nexora.ai"
-    email_filters = [email_str, "guest@nexora.ai", "guest", "student@nexora.ai"]
+    """Computes real, live study statistics aggregated across the current user's database activities."""
+    email_str = (user_email or "").strip().lower()
+    is_guest = not email_str or email_str in ["guest@nexora.ai", "guest"]
 
-    notes_count = db.query(Note).filter(Note.user_email.in_(email_filters)).count()
-    quiz_attempts_count = db.query(QuizAttempt).filter(QuizAttempt.user_email.in_(email_filters)).count()
-    quizzes_count = db.query(Quiz).filter(Quiz.user_email.in_(email_filters)).count()
-    study_plans_count = db.query(StudyPlan).filter(StudyPlan.user_email.in_(email_filters)).count()
-    media_count = db.query(MediaTranscript).filter(MediaTranscript.user_email.in_(email_filters)).count()
-    history_count = db.query(History).filter(History.user_email.in_(email_filters)).count()
+    user = None
+    if not is_guest:
+        user = db.query(User).filter(func.lower(User.email) == email_str).first()
 
-    total_quizzes = max(1, quiz_attempts_count + quizzes_count)
+    def apply_user_filter(query, model):
+        if is_guest:
+            return query.filter(model.user_email.in_(["guest@nexora.ai", "guest"]))
+        if user and hasattr(model, "user_id"):
+            return query.filter(
+                (func.lower(model.user_email) == email_str) | (model.user_id == user.id)
+            )
+        return query.filter(func.lower(model.user_email) == email_str)
 
-    # Compute realistic study hours:
-    # 0.5h per note + 0.3h per quiz attempt + 1.0h per study plan + 0.75h per media lecture + 0.25h general activities
+    notes_count = apply_user_filter(db.query(Note), Note).count()
+    quiz_attempts_count = apply_user_filter(db.query(QuizAttempt), QuizAttempt).count()
+    quizzes_count = apply_user_filter(db.query(Quiz), Quiz).count()
+    study_plans_count = apply_user_filter(db.query(StudyPlan), StudyPlan).count()
+    media_count = apply_user_filter(db.query(MediaTranscript), MediaTranscript).count()
+    history_count = apply_user_filter(db.query(History), History).count()
+
+    total_quizzes = quiz_attempts_count if quiz_attempts_count > 0 else quizzes_count
+
+    # Compute realistic study hours based strictly on the user's logged activity:
     calculated_hours = (
         (notes_count * 0.5) +
         (quiz_attempts_count * 0.4) +
@@ -34,15 +46,23 @@ def get_user_stats(user_email: Optional[str] = Depends(get_current_user_email), 
         (media_count * 0.75) +
         (history_count * 0.2)
     )
-    study_hours = round(max(2.5, calculated_hours), 1)
+    study_hours = round(calculated_hours, 1)
 
-    # Compute mastery score: based on actual average score if attempts exist, else calculated curve
-    avg_score = db.query(func.avg(QuizAttempt.score_percentage)).filter(QuizAttempt.user_email.in_(email_filters)).scalar()
+    # Compute mastery score: based on actual average score if attempts exist, else based on user activity
+    avg_score_query = apply_user_filter(
+        db.query(func.avg(QuizAttempt.score_percentage)),
+        QuizAttempt
+    )
+    avg_score = avg_score_query.scalar()
+
     if avg_score is not None:
-        mastery_val = min(99, max(60, int(round(avg_score))))
+        mastery_val = min(100, max(0, int(round(avg_score))))
+        mastery = f"{mastery_val}%"
+    elif notes_count > 0 or history_count > 0:
+        mastery_val = min(100, (notes_count * 10) + (history_count * 5))
+        mastery = f"{mastery_val}%"
     else:
-        mastery_val = min(98, max(75, 75 + (notes_count * 2) + (history_count * 3)))
-    mastery = f"{mastery_val}%"
+        mastery = "0%"
 
     return {
         "total_notes": notes_count,
