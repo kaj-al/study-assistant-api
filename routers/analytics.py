@@ -29,12 +29,15 @@ def get_user_stats(user_email: Optional[str] = Depends(get_current_user_email), 
             )
         return query.filter(func.lower(model.user_email) == email_str)
 
-    notes_count = apply_user_filter(db.query(Note), Note).count()
-    quiz_attempts_count = apply_user_filter(db.query(QuizAttempt), QuizAttempt).count()
-    quizzes_count = apply_user_filter(db.query(Quiz), Quiz).count()
-    study_plans_count = apply_user_filter(db.query(StudyPlan), StudyPlan).count()
-    media_count = apply_user_filter(db.query(MediaTranscript), MediaTranscript).count()
-    history_count = apply_user_filter(db.query(History), History).count()
+    def count_items(model):
+        return apply_user_filter(db.query(func.count(model.id)), model).scalar() or 0
+
+    notes_count = count_items(Note)
+    quiz_attempts_count = count_items(QuizAttempt)
+    quizzes_count = count_items(Quiz)
+    study_plans_count = count_items(StudyPlan)
+    media_count = count_items(MediaTranscript)
+    history_count = count_items(History)
 
     total_quizzes = quiz_attempts_count if quiz_attempts_count > 0 else quizzes_count
 
