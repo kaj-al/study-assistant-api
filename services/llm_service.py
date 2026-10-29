@@ -109,12 +109,9 @@ def clean_asterisks(text: str) -> str:
     if not text:
         return ""
     import re
-    # Convert leading bullet asterisks (* Item) to dash (- Item)
     text = re.sub(r'(?m)^\s*[\*•]\s+', '- ', text)
-    # Remove all ** and * markers while preserving the words inside
     text = text.replace("**", "")
     text = text.replace("*", "")
-    # Clean up accidental double spaces
     text = re.sub(r'[ \t]{2,}', ' ', text)
     return text.strip()
 
